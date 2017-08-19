@@ -92,3 +92,65 @@ vhost 之间绝对隔离，优点：安全，便于移植
 事务
 AMQP 事务：设置信道为事务模式，发送消息，提交；问题：性能，迫使生产者与 MQ 产生同步
 RabbitMQ：发送方确认，信道设置成 confirm 模式，即可发送消息。信道为消息指派唯一ID，消息发服务端处理完成后**异步**发送一个确认给生产者
+
+
+erlang
+
+节点：虚拟机实例
+程序：多个程序可以运行在同一个节点上
+节点之间可以进行本地通信，而不管它们是否真的在同一台服务器上（这是什么黑科技）
+当应用程序崩溃时，节点没有崩溃，会自动尝试重启应用程序
+
+命令
+节点：
+启动：rabbitmq-server -server 
+守护进程方式启动：rabbitmq-server -server -detached
+关闭：rabbitmqctl stop
+
+程序：
+停止：rabbitmqctl stop_app
+
+配置
+配置文件：/etc/rabbitmq/rabbitmq.config
+配置结构：[{app_name,[{config_name, config_value}]}]
+
+Mnesia：存储队列，交换器，绑定等元数据的None SQL DB。存储过程：先写入日志文件，在定期转储到 Mnesia 数据库文件
+  dump_log_write_threshold：转储频度
+Rabbit：RabbitMQ 特定的配置选项
+  tcp_listeners
+  ssl_listeners
+  ssl_options
+  vm_memory_high_watermark：允许消耗的内存，默认0.4
+  msg_store_file_size_limit：垃圾收集存储内容之前消息存储数据库的最大大小
+  queue_index_max_journal_entries：在转储到消息存储数据库并提交之前消息存储日志里的最大条目数
+  
+权限
+用户是访问控制的基本单元
+管理用户
+创建：rabbitmqctl add_user USER_NAME PASSWORD
+删除：rabbitmqctl delete_user USER_NAME
+查看所有用户：rabbitmqctl list_users
+修改密码：rabbitmqctl change_password USER_NAME NEW_PWD
+授权：rabbitmqctl set_permissions -p VHOST USER_NAME 配置权限 写权限 读权限
+  权限写法示例：
+    ".*" ：匹配任何队列和交换器
+    "checks-.*" ：只匹配名字以“checks-”开头的队列和交换器
+    "" ：不匹配队列和交换器
+查看授权：rabbitmqctl list_permissions -p VHOST
+清除授权：rabbitmqctl clear_permissions -p VHOST USER_NAME
+修改授权：rabbitmqctl set_permissions
+
+-p：指定虚拟主机或者路径信息
+
+检查
+检查所有队列：rabbitmqctl list_queue
+检查交换器：rabbitmqctl list_exchanges
+检查绑定：rabbitmqctl list_bindings
+
+日志
+日志位置：/var/log/rabbitmq
+日志文件：
+  - RABBITMQ_NODENAME_sasl.log：erlang 程序日志
+  - RABBITMQ_NODENAME.log：服务器运行信息
+轮换日志：rabbitmqctl rotate_logs SUFFIX
+通过 AMQP 访问日志：amq.rabbitmq.log 的 topic 交换器，绑定的路由键：error，warning， info
