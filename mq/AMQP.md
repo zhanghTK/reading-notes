@@ -182,3 +182,53 @@ Rabbit：RabbitMQ 特定的配置选项
 集群系统必须保证至少有一个磁盘节点（不要求所有节点都是磁盘节点是为了性能，想象一下 RPC 场景）
 如果集中唯一的磁盘节点挂了，集群可以路由消息，但不能创建队列/交换器/绑定/用户，更改权限，添加删除集群节点
 内存节点重启后从磁盘节点获取元数据
+
+设置集群
+- 关闭所有插件
+- 指定端口，名称启动多个节点
+- 加入集群
+  - 保持一个节点运行
+  - 依此关闭其他节点，并清空元数据
+  - 依此将关闭的节点加入集群
+-启动
+
+三个节点集群配置，两个磁盘节点，一个内存节点
+```shell
+# 所有的 -n 参数说明在指定节点而非默认节点执行命令
+
+# 启动三个节点
+RABBITMQ_NODE_PORT=5672 RABBITMQ_NODENAME=rabbit rabbitmq-server -detached
+RABBITMQ_NODE_PORT=5673 RABBITMQ_NODENAME=rabbit_1 rabbitmq-server -detached
+RABBITMQ_NODE_PORT=5674 RABBITMQ_NODENAME=rabbit_2 rabbitmq-server -detached
+
+# 停止节点，清空元数据
+rabbitmqctl -n rabbit_1@{HOSTNAME} stop_app
+rabbitmqctl -n rabbit_2@{HOSTNAME} stop_app
+rabbitmqctl -n rabbit_1@{HOSTNAME} reset
+rabbitmqctl -n rabbit_2@{HOSTNAME} reset
+
+# 加入集群节点，cluster 后面的是磁盘节点，如果磁盘节点包括新增节点 rabbitmqctl 可以识别你希望该节点为磁盘节点
+rabbitmqctl -n rabbit_1@{HOSTNAME} cluster rabbit@{HOSTNAME} rabbit_1@{HOSTNAME}
+rabbitmqctl -n rabbit_2@{HOSTNAME} cluster rabbit@{HOSTNAME} rabbit_1@{HOSTNAME}
+
+# 重新启动
+rabbitmqctl -n rabbit_1@{HOSTNAME} start_app
+rabbitmqctl -n rabbit_2@{HOSTNAME} start_app
+
+# 查看集群状态
+rabbitmqctl cluster_status
+```
+
+物理集群搭建
+先复制 Erlang cookie，其他如上
+
+移除节点
+rabbitmqctl stop_app
+rabbitmqctl reset # 重设节点是集群中节点时，是移除命令
+rabbitmqctl start_app
+
+集群节点升级
+通过 RabbitMQ Management 插件备份当前配置
+关闭所有生产者并等待消费者消费完队列中的所有消息
+关闭节点，解压新版
+启动磁盘节点，启动内存节点
