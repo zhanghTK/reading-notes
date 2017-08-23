@@ -232,3 +232,26 @@ rabbitmqctl start_app
 关闭所有生产者并等待消费者消费完队列中的所有消息
 关闭节点，解压新版
 启动磁盘节点，启动内存节点
+
+镜像队列
+镜像队列：内建的双活冗余
+某种程度上镜像队列可以视为拥有一个隐藏的 fanout 交换器
+镜像队列注意事项：
+1. 镜像队列不能作为负载均衡使用，因为每个操作在所有节点都要做一遍
+2. ha-mode 参数与 durable, declare 对 exclusive 队列都不生效。exclusive队列是连接独占的，当连接断开，队列自动删除，这两个参数对exclusive队列没有意义
+3. 将新节点加入已存在的镜像队列时，默认情况下 ha-sync-mode=manual，镜像队列中的消息不会主动同步到新节点，除非显式调用同步命令。当调用同步命令后，队列开始阻塞，无法对其进行操作，直到同步完毕。当 ha-sync-mode=automatic 时，新加入节点时会默认同步已知的镜像队列。由于同步过程的限制，所以不建议在生产环境的active队列(有生产消费消息)中操作
+4. 每当一个节点加入或者重新加入(例如从网络分区中恢复回来)镜像队列，之前保存的队列内容会被清空
+5. 镜像队列有主从之分，一个主节点(master)，0个或多个从节点(slave)。当 master 宕掉后，会在 slave中 选举新的master。选举算法为最早启动的节点
+6. 当所有slave都处在(与master)未同步状态时，并且 ha-promote-on-shutdown policy 设置为 when-syned(默认) 时，如果 master 因为主动的原因停掉，比如是通过 rabbitmqctl stop 命令停止或者优雅关闭 OS，那么slave不会接管 master，也就是说此时镜像队列不可用
+   但是如果master因为被动原因停掉，比如 VM 或者 OS crash了，那么 slave 会接管 master。这个配置项隐含的价值取向是优先保证消息可靠不丢失，放弃可用性。
+   如果 ha-promote-on-shutdown policy 设置为 alway，那么不论 master 因为何种原因停止，slave 都会接管 master，优先保证可用性
+7. 镜像队列中最后一个停止的节点会是 master，启动顺序必须是 master 先起，如果 slave 先起，它会有 30 秒的等待时间，等待 master 启动，然后加入 cluster。
+   当所有节点因故(断电等)同时离线时，每个节点都认为自己不是最后一个停止的节点。要恢复镜像队列，可以尝试在 30 秒之内同时启动所有节点
+8. 对于镜像队列，客户端basic.publish操作会同步到所有节点；而其他操作则是通过master中转，再由master将操作作用于salve。比如一个basic.get操作，假如客户端与slave建立了TCP连接，首先是slave将basic.get请求发送至master，由master备好数据，返回至slave，投递给消费者
+9. 当 slave 宕掉时，除了与 slave 相连的客户端连接全部断开之外，没有其他影响。
+   当 master 宕掉时，会有以下连锁反应：
+   1. 与 master 相连的客户端连接全部断开。
+   2. 选举最老的 slave 为 master。若此时所有 slave 处于未同步状态，则未同步部分消息丢失。
+   3. 新的 master 节点 requeue 所有 unack 消息，因为这个新节点无法区分这些 unack 消息是否已经到达客户端，亦或是 ack 消息丢失在到老master的通路上，亦或是丢在老 master 组播 ack 消息到所有 slave 的通路上。所以处于消息可靠性的考虑，requeue 所有 unack 的消息。此时客户端可能受到重复消息。
+   4. 如果客户端连着 slave，并且 basic.consume 消息时指定了x-cancel-on-ha-failover参数，那么客户端会收到一个 Consumer Cancellation Notification 通知，Java SDK中会回调 Consumer 接口的handleCancel() 方法，故需覆盖此方法。如果不指定 x-cancel-on-ha-failover 参数，那么消费者就无法感知 master 宕机，会一直等待下去
+
